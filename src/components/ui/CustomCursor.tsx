@@ -8,8 +8,8 @@ export function CustomCursor() {
   const dotRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const ring = ringRef.current
-    const dot  = dotRef.current
+    const ring = ringRef.current!
+    const dot  = dotRef.current!
     if (!ring || !dot) return
 
     let mx = -100, my = -100   /* start off-screen */

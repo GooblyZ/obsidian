@@ -1,20 +1,21 @@
 import './App.css'
 import { Suspense, lazy } from 'react'
-import { AmbientGradient }  from './components/canvas/AmbientGradient'
-import { SceneNav }         from './components/nav/SceneNav'
-import { PersistentCTA }    from './components/nav/PersistentCTA'
-import { SweepLine }        from './components/ui/SweepLine'
-import { CustomCursor }     from './components/ui/CustomCursor'
-import { Preloader }        from './components/ui/Preloader'
-import { HeroScene }        from './scenes/01-hero/HeroScene'
-import { FragmentScene }    from './scenes/02-fragment/FragmentScene'
-import { RunnerScene }      from './scenes/02b-runner/RunnerScene'
-import { BreathScene }      from './scenes/03-breath/BreathScene'
-import { ArchiveScene }     from './scenes/04-archive/ArchiveScene'
-import { SignalScene }      from './scenes/05-signal/SignalScene'
+import { AmbientGradient }   from './components/canvas/AmbientGradient'
+import { SceneNav }          from './components/nav/SceneNav'
+import { PersistentCTA }     from './components/nav/PersistentCTA'
+import { SweepLine }         from './components/ui/SweepLine'
+import { CustomCursor }      from './components/ui/CustomCursor'
+import { FloatingFragments } from './components/ui/FloatingFragments'
+import { Preloader }         from './components/ui/Preloader'
+import { MemoryMoth }        from './components/entity/MemoryMoth'
+import { HeroScene }         from './scenes/01-hero/HeroScene'
+import { FragmentScene }     from './scenes/02-fragment/FragmentScene'
+import { RunnerScene }       from './scenes/02b-runner/RunnerScene'
+import { BreathScene }       from './scenes/03-breath/BreathScene'
+import { ArchiveScene }      from './scenes/04-archive/ArchiveScene'
+import { SignalScene }       from './scenes/05-signal/SignalScene'
 
-/* Three.js canvas — lazy loaded so text narrative renders immediately.
-   The WebGL layer is a visual enhancement, not a requirement.             */
+/* Three.js canvas — lazy loaded so text narrative renders immediately. */
 const ObsidianCanvas = lazy(() =>
   import('./components/canvas/ObsidianCanvas').then(m => ({ default: m.ObsidianCanvas }))
 )
@@ -31,10 +32,17 @@ export default function App() {
       </Suspense>
 
       <AmbientGradient />
+
+      {/* Memory Moth — OBSIDIAN's guide entity, follows cursor with lag */}
+      <MemoryMoth />
+
       <SceneNav />
       <PersistentCTA />
 
-      <main id="scroll-content">
+      <main id="scroll-content" style={{ position: 'relative' }}>
+
+        {/* Depth layer — floating fragments parallax between canvas and content */}
+        <FloatingFragments />
 
         <HeroScene />
         <div style={{ padding: '0 6vw' }}><SweepLine color="violet" /></div>

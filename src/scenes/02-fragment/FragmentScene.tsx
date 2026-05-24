@@ -4,7 +4,12 @@ import { gsap, ScrollTrigger } from '../../lib/gsap'
 /* Scene 02 — FRAGMENT
    Three weighted statements surface word by word.
    Each carries a gold italic anchor — the emotional nucleus of the line.
-   Silence between lines is structural: 16vh of empty breathing room. */
+   Silence between lines is structural: 16vh of empty breathing room.
+
+   Interaction — magnetic em words:
+     On cursor proximity (radius 110px), the em word drifts away on the x-axis.
+     Only x is used — y is claimed by the reveal animation. The displacement is
+     subtle (max ±14px) but makes the words feel physically present.           */
 
 const LINES: Array<{ prefix: string[]; em: string; suffix: string[] }> = [
   {
@@ -29,6 +34,10 @@ export function FragmentScene() {
   const lineRefs   = useRef<(HTMLParagraphElement | null)[]>([])
 
   useEffect(() => {
+    const section = sectionRef.current
+    if (!section) return
+
+    /* ── Reveal animations ── */
     const ctx = gsap.context(() => {
       lineRefs.current.forEach((line) => {
         if (!line) return
@@ -62,7 +71,44 @@ export function FragmentScene() {
       })
     }, sectionRef)
 
-    return () => ctx.revert()
+    /* ── Magnetic em words ──────────────────────────────────────────────────
+       Cursor proximity pushes each .em span along the x-axis only.
+       quickTo batches the animation frames — safe to call on every mousemove. */
+    const emEls = Array.from(section.querySelectorAll<HTMLElement>('.em'))
+    const quickX = emEls.map((el) =>
+      gsap.quickTo(el, 'x', { duration: 0.65, ease: 'power3.out' })
+    )
+
+    const RADIUS  = 110   /* px — influence radius                */
+    const MAX_PX  = 14    /* px — maximum horizontal displacement */
+
+    function onMouseMove(e: MouseEvent) {
+      emEls.forEach((el, i) => {
+        const rect  = el.getBoundingClientRect()
+        const cx    = rect.left + rect.width  / 2
+        const cy    = rect.top  + rect.height / 2
+        const dx    = e.clientX - cx
+        const dy    = e.clientY - cy
+        const dist  = Math.sqrt(dx * dx + dy * dy)
+
+        if (dist < RADIUS && dist > 0.01) {
+          /* Push: word moves away from cursor on x axis */
+          const push = -(dx / dist) * (1 - dist / RADIUS) * MAX_PX
+          quickX[i](push)
+        } else {
+          quickX[i](0)
+        }
+      })
+    }
+
+    section.addEventListener('mousemove', onMouseMove)
+
+    return () => {
+      ctx.revert()
+      section.removeEventListener('mousemove', onMouseMove)
+      /* Reset x transforms so words sit correctly if component remounts */
+      emEls.forEach((el) => gsap.set(el, { x: 0 }))
+    }
   }, [])
 
   return (
@@ -71,7 +117,6 @@ export function FragmentScene() {
       ref={sectionRef}
       style={{ minHeight: '260dvh', position: 'relative', padding: '20vh 10vw' }}
     >
-      {/* sticky container keeps lines centered while section scrolls */}
       <div style={{
         display: 'flex', flexDirection: 'column',
         justifyContent: 'center', gap: '18vh', paddingTop: '15vh',

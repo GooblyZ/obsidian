@@ -142,25 +142,10 @@ export function SignalScene() {
       <h2
         ref={titleRef}
         className="display-lg"
-        style={{
-          maxWidth: '80vw',
-          background: 'linear-gradient(135deg, #e8e4f0 0%, #a99fff 42%, #d4af7a 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          backgroundClip: 'text',
-        }}
+        style={{ maxWidth: '80vw', color: 'var(--color-text)' }}
       >
         Are you still{' '}
-        <em
-          style={{
-            fontStyle: 'italic',
-            fontFamily: 'var(--font-display)',
-            fontWeight: 300,
-            WebkitTextFillColor: 'var(--color-gold)',
-          }}
-        >
-          here
-        </em>?
+        <em className="em">here</em>?
       </h2>
 
       <p
