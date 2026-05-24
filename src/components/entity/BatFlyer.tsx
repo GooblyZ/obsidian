@@ -5,7 +5,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { useScrollProgress } from '../../hooks/useScrollProgress'
 import { mousePos }           from '../../lib/mousePosition'
 
-/* ── BatFlyer v6 ─────────────────────────────────────────────────────────────
+/* ── BatFlyer v7 ─────────────────────────────────────────────────────────────
    Real skeletal GLB bat — DRACO-compressed, 177-channel armature.
    GLB: /public/bat.glb  (104 KB · "Armature|Take 001|BaseLayer" · 0.3 s loop)
 
@@ -25,6 +25,8 @@ import { mousePos }           from '../../lib/mousePosition'
    · procedural float  — gentle sin/cos drift on top (does not conflict with mixer)
    · camera lag        — cinematic 0.028 factor lerp toward story target
    · mouse parallax    — ±0.06 / ±0.04 fine nudge after lag
+   · final-section     — IntersectionObserver on #scene-signal; bat slowly follows
+                         cursor when "Are you still here?" is visible (desktop only)
 
    STORY DESIGN  (bat normalized to ~2.2 units wingspan, 65° FOV)
    Distance formula: D = camZ − batZ   fill% ≈ 0.97 / D
@@ -340,6 +342,28 @@ export function BatFlyer() {
     let ccry = STORY[0].cameraRotation[1]
     let ccrz = STORY[0].cameraRotation[2]
 
+    /* ── Final-section mouse-follow ─────────────────────────────────────────
+       When #scene-signal ("Are you still here?") is in view the bat detaches
+       from the scroll story and slowly follows the cursor instead.
+       · finalBlend 0→1 ramps via lerp so the handoff is imperceptible
+       · follow* vars chase the mouse target at a very slow 0.025 factor
+       · Disabled on mobile (touch users have no mouse to follow)            */
+    let isFinalSection = false
+    let finalBlend     = 0
+    /* Initialise to story[5] so there is no jump when blend starts */
+    let followX  = STORY[5].batPosition[0]
+    let followY  = STORY[5].batPosition[1]
+    let followZ  = STORY[5].batPosition[2]
+    let followRY = STORY[5].batRotation[1]
+    let followRX = STORY[5].batRotation[0]
+
+    const signalEl = document.getElementById('scene-signal')
+    const signalObserver = new IntersectionObserver(
+      ([entry]) => { isFinalSection = entry.isIntersecting },
+      { threshold: 0.30 },
+    )
+    if (signalEl) signalObserver.observe(signalEl)
+
     /* ── Text tracking ── */
     let lastTextIdx = -1
 
@@ -368,22 +392,56 @@ export function BatFlyer() {
       const scroll = Math.max(0, Math.min(1, scrollProgress.current))
       const kf     = sampleStory(scroll)
 
+      /* ── Final-section blend ────────────────────────────────────────────────
+         Ramp finalBlend toward 1 when the signal section is visible (desktop
+         only), toward 0 otherwise.  0.035 factor ≈ 1.4 s to fully engage.  */
+      const blendTarget = (!isMobile && isFinalSection) ? 1 : 0
+      finalBlend = lerp(finalBlend, blendTarget, 0.035)
+
+      /* Advance mouse-follow vars only while blend is non-trivial */
+      if (finalBlend > 0.005) {
+        const mx = mousePos.active ? (mousePos.x / window.innerWidth  - 0.5) * 2 : 0
+        const my = mousePos.active ? (mousePos.y / window.innerHeight - 0.5) * 2 : 0
+        /* Target position — centered, drawn toward mouse */
+        const tX = THREE.MathUtils.clamp(mx  *  1.5, -1.6,  1.6)
+        const tY = THREE.MathUtils.clamp(-my *  0.7 + 1.1,   0.2,  1.9)
+        const tZ = -1.0   /* bring bat forward from Z=-3 so it is present */
+        followX  = lerp(followX,  tX,         0.025)
+        followY  = lerp(followY,  tY,         0.025)
+        followZ  = lerp(followZ,  tZ,         0.018)
+        /* Slight head/body rotation toward cursor */
+        followRY = lerp(followRY, mx * 0.35,  0.035)
+        followRX = lerp(followRX, -my * 0.18, 0.035)
+      }
+
       /* ── AnimationMixer ── */
       if (mixer) {
         mixer.update(dt)
-        if (action) action.timeScale = 0.25 + kf.flapAmp * 0.45
+        /* Calm the wings further in the final section */
+        const storyScale = 0.25 + kf.flapAmp * 0.45
+        const calmScale  = 0.28
+        if (action) action.timeScale = lerp(storyScale, calmScale, finalBlend)
       }
 
-      /* ── Bat transform — story + procedural float ── */
+      /* ── Bat transform — story + procedural float + final-section blend ── */
       if (batReady) {
         const floatY    = Math.sin(accumulatedTime * 0.42) * 0.06
         const floatX    = Math.cos(accumulatedTime * 0.29) * 0.025
         const floatRoll = Math.sin(accumulatedTime * 0.35) * 0.018
 
-        batGroup.position.set(kf.bx + floatX, kf.by + floatY, kf.bz)
-        batGroup.rotation.set(kf.brx, kf.bry, kf.brz + floatRoll, 'YXZ')
+        /* Blend between scroll-story position and mouse-follow position */
+        const posX = lerp(kf.bx + floatX, followX, finalBlend)
+        const posY = lerp(kf.by + floatY, followY, finalBlend)
+        const posZ = lerp(kf.bz,          followZ, finalBlend)
+        const rotY = lerp(kf.bry,         followRY, finalBlend)
+        const rotX = lerp(kf.brx,         followRX, finalBlend)
+        /* In the final section bring opacity up to fully visible */
+        const opac = lerp(kf.batOpacity,  1.0,      finalBlend)
+
+        batGroup.position.set(posX, posY, posZ)
+        batGroup.rotation.set(rotX, rotY, kf.brz + floatRoll, 'YXZ')
         batGroup.scale.setScalar(kf.bScale * scaleMul)
-        batMat.opacity = kf.batOpacity
+        batMat.opacity = opac
       }
 
       /* ── Camera: cinematic lag + mouse parallax ── */
@@ -404,13 +462,18 @@ export function BatFlyer() {
       ;(scene.fog as THREE.FogExp2).density = kf.fogDensity
       moonLight.intensity = kf.lightIntensity
 
-      rimLight.position.set(kf.bx - 0.5, kf.by + 0.8, kf.bz - 1.8)
-      rimLight.intensity = 6 + kf.batOpacity * 4
+      /* Lights follow the blended bat position so they stay correct in both modes */
+      const lx = lerp(kf.bx, followX, finalBlend)
+      const ly = lerp(kf.by, followY, finalBlend)
+      const lz = lerp(kf.bz, followZ, finalBlend)
 
-      accentLight.position.set(kf.bx + 0.5, kf.by + 0.1, kf.bz + 1.2)
-      accentLight.intensity = kf.batOpacity * 3.5
+      rimLight.position.set(lx - 0.5, ly + 0.8, lz - 1.8)
+      rimLight.intensity = 6 + lerp(kf.batOpacity, 1.0, finalBlend) * 4
 
-      fillLight.position.y = lerp(fillLight.position.y, kf.by - 2.2, 0.04)
+      accentLight.position.set(lx + 0.5, ly + 0.1, lz + 1.2)
+      accentLight.intensity = lerp(kf.batOpacity, 1.0, finalBlend) * 3.5
+
+      fillLight.position.y = lerp(fillLight.position.y, ly - 2.2, 0.04)
 
       /* ── Atmosphere overlay ── */
       const presence = THREE.MathUtils.clamp(
@@ -459,6 +522,8 @@ export function BatFlyer() {
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
+      if (signalEl) signalObserver.unobserve(signalEl)
+      signalObserver.disconnect()
       if (_sc) _sc.style.filter = ''
       if (mixer) mixer.stopAllAction()
       batMat.dispose()
