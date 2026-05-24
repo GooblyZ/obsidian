@@ -1,153 +1,131 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import { GLTFLoader }  from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { useScrollProgress } from '../../hooks/useScrollProgress'
+import { mousePos }           from '../../lib/mousePosition'
 
-// ── GLTF scaffold — swap procedural geometry for a real .glb asset ──────────
-// import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-// Usage (inside useEffect, after scene is created):
-//   const loader = new GLTFLoader()
-//   loader.load('/bat.glb', (gltf) => {
-//     scene.add(gltf.scene)
-//     gltf.scene.traverse((child) => {
-//       if ((child as THREE.Mesh).isMesh) batMeshes.push(...)
-//     })
-//   })
-// ────────────────────────────────────────────────────────────────────────────
+/* ── BatFlyer v4 ─────────────────────────────────────────────────────────────
+   Real skeletal GLB bat — DRACO-compressed, 177-channel armature animation.
+   GLB asset : /public/bat.glb   (104 KB, "Armature|Take 001|BaseLayer", 0.3 s)
 
-/* ── BatFlyer v3 ─────────────────────────────────────────────────────────────
-   Cinematic scrollytelling — 6 story states, smooth interpolation, animated
-   camera, atmospheric fog, and per-segment narrative text.
+   ARCHITECTURE
+   ┌ batGroup          — world position/rotation/scale from scrollStory
+   │  └ gltf.scene     — AnimationMixer drives all 61 bones
+   └ particles         — 200 dust motes, trail the bat with soft lag
 
-   ANATOMY (preserved from v2)
-   · Body   — CapsuleGeometry, aligned along z
-   · Head   — elongated SphereGeometry
-   · Ears   — ConeGeometry × 2
-   · Wings  — bezier ShapeGeometry membrane + CylinderGeometry bone struts
-   · Thumb  — ConeGeometry hook at each wrist
+   CINEMATIC LAYERS
+   · scrollStory       — 6 states interpolated by scroll (ease-in-out)
+   · procedural float  — gentle sinusoidal drift layered on top
+   · camera lag        — position + rotation follow story at factor 0.028
+   · mouse parallax    — fine ±0.06 / ±0.04 camera nudge from cursor
 
-   STORY FORMAT
-   · 6 states: progress, batPosition/Rotation/Scale, cameraPosition/Rotation,
-     lightIntensity, fogDensity, flapAmp, flapHz, batOpacity, text
-   · sampleStory() ease-in-out interpolation between nearest two states
-   · Returns flat SampledState struct — no per-frame allocations
+   ANIMATION
+   · AnimationMixer plays the embedded wing-flap loop continuously
+   · action.timeScale  = 0.7 + flapAmp × 1.6  (slow glide → fast sprint)
+   · batGroup rotation = story rotation  (cinematic heading changes)
 
-   CAMERA
-   · Target follows sampleStory cameraPosition/Rotation
-   · Current position lerps toward target at factor 0.028 (cinematic lag)
+   LIGHTING   · AmbientLight   — very dark blue-violet base
+   · DirectionalLight — moonlight from upper left, intensity ∝ story
+   · PointLight (rim) — violet, trails bat from behind
+   · PointLight (fill)— warm amber from below, constant
+   · PointLight (acc) — teal accent, follows bat, fades with batOpacity
 
    ATMOSPHERE
-   · THREE.FogExp2 density updated each frame from story interpolation
-   · Overlay div opacity driven by bat proximity × batOpacity
-   · #scroll-content filter: brightness + hue-rotate
+   · FogExp2           — density from story (0.008 to 0.025)
+   · Overlay vignette  — violet, opacity ∝ bat presence
+   · #scroll-content   — brightness + hue-rotate filter
 
    TEXT OVERLAY
-   · Fixed, centered at bottom third — section label + narrative copy
-   · Updated via DOM refs (zero React re-renders)
-   · Per-segment fade/slide: in over first 20%, full 20–80%, out last 20%
+   · Section label + narrative copy, updated via DOM refs (no re-renders)
+   · Fade/slide envelope: 0-20 % in, 20-80 % hold, 80-100 % out
 
    FALLBACKS
-   · Reduced-motion: single static render at story[2], no RAF loop
-   · Mobile: 0.65× scale multiplier, reduced pixel ratio, no antialiasing
+   · Reduced-motion    — single static frame at STORY[2], no RAF
+   · Mobile            — 0.65 × scale, 1.5 × DPR cap, no antialiasing
+   · Load failure      — console.error, component stays invisible
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* ── Story data ─────────────────────────────────────────────────────────────── */
 interface StoryState {
   progress:       number
   batPosition:    [number, number, number]
-  batRotation:    [number, number, number]
+  batRotation:    [number, number, number]   /* Euler YXZ */
   batScale:       number
   cameraPosition: [number, number, number]
   cameraRotation: [number, number, number]
   lightIntensity: number
   fogDensity:     number
-  flapAmp:        number   /* wing amplitude 0→1 */
-  flapHz:         number   /* beats per second   */
-  batOpacity:     number   /* overall bat opacity */
+  flapAmp:        number
+  batOpacity:     number
   text:           string
 }
 
 const STORY: readonly StoryState[] = [
   {
     progress: 0,
-    batPosition: [0, 1, 4], batRotation: [0, 0, 0], batScale: 1.0,
+    batPosition: [0, 1, 4],  batRotation: [0, 0, 0],          batScale: 1.0,
     cameraPosition: [0, 0, 8], cameraRotation: [0, 0, 0],
-    lightIntensity: 1.0, fogDensity: 0.020,
-    flapAmp: 0.22, flapHz: 0.50, batOpacity: 0.0,
+    lightIntensity: 1.0, fogDensity: 0.020, flapAmp: 0.22, batOpacity: 0.0,
     text: 'When uncertainty begins',
   },
   {
     progress: 0.18,
     batPosition: [-2, 1.4, 2], batRotation: [0.2, -0.8, 0.1], batScale: 1.05,
     cameraPosition: [1, 0.5, 6], cameraRotation: [0.05, -0.15, 0],
-    lightIntensity: 1.3, fogDensity: 0.025,
-    flapAmp: 0.48, flapHz: 0.72, batOpacity: 1.0,
+    lightIntensity: 1.3, fogDensity: 0.025, flapAmp: 0.48, batOpacity: 1.0,
     text: 'We identify the risk',
   },
   {
     progress: 0.36,
     batPosition: [1.8, 0.8, 0], batRotation: [-0.1, 1.2, -0.2], batScale: 0.95,
     cameraPosition: [-1, 1, 5], cameraRotation: [0.1, 0.2, 0],
-    lightIntensity: 1.6, fogDensity: 0.018,
-    flapAmp: 0.60, flapHz: 0.86, batOpacity: 1.0,
+    lightIntensity: 1.6, fogDensity: 0.018, flapAmp: 0.60, batOpacity: 1.0,
     text: 'We build the strategy',
   },
   {
     progress: 0.56,
     batPosition: [0, 1.7, -1.5], batRotation: [0.3, 2.2, 0.15], batScale: 1.15,
     cameraPosition: [0, 1.4, 4.2], cameraRotation: [0.12, 0, 0],
-    lightIntensity: 2.0, fogDensity: 0.012,
-    flapAmp: 0.72, flapHz: 0.98, batOpacity: 1.0,
+    lightIntensity: 2.0, fogDensity: 0.012, flapAmp: 0.72, batOpacity: 1.0,
     text: 'We move with precision',
   },
   {
     progress: 0.76,
     batPosition: [-1.4, 1.1, -3], batRotation: [-0.2, 3.1, -0.1], batScale: 1.0,
     cameraPosition: [1.2, 0.8, 3.6], cameraRotation: [0.05, -0.25, 0],
-    lightIntensity: 1.7, fogDensity: 0.015,
-    flapAmp: 0.55, flapHz: 0.80, batOpacity: 1.0,
+    lightIntensity: 1.7, fogDensity: 0.015, flapAmp: 0.55, batOpacity: 1.0,
     text: 'Every detail matters',
   },
   {
     progress: 1,
     batPosition: [0, 1.2, -4.5], batRotation: [0, 6.28, 0], batScale: 1.2,
     cameraPosition: [0, 0.8, 3], cameraRotation: [0.05, 0, 0],
-    lightIntensity: 2.4, fogDensity: 0.008,
-    flapAmp: 0.40, flapHz: 0.68, batOpacity: 0.6,
+    lightIntensity: 2.4, fogDensity: 0.008, flapAmp: 0.40, batOpacity: 0.6,
     text: 'Your case. Our strategy.',
   },
 ]
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'] as const
 
-/* ── Interpolation helpers ──────────────────────────────────────────────────── */
+/* ── Interpolation ──────────────────────────────────────────────────────────── */
 function eio(t: number): number { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t }
 function lerp(a: number, b: number, t: number): number { return a + (b - a) * t }
 
-interface SampledState {
-  /* Bat */
+interface Sampled {
   bx: number; by: number; bz: number
   brx: number; bry: number; brz: number
-  bScale: number
-  batOpacity: number
-  /* Camera target */
+  bScale: number; batOpacity: number
   cx: number; cy: number; cz: number
   crx: number; cry: number; crz: number
-  /* Scene */
-  lightIntensity: number
-  fogDensity:     number
-  /* Wings */
-  flapAmp: number
-  flapHz:  number
-  /* Segment index — which of the two surrounding states is earlier */
-  storyIdx: number
+  lightIntensity: number; fogDensity: number
+  flapAmp: number; storyIdx: number
 }
 
-function sampleStory(scroll: number): SampledState {
+function sampleStory(scroll: number): Sampled {
   const s = STORY
 
-  /* Clamp to first */
-  if (scroll <= s[0].progress) {
-    const a = s[0]
+  function fromState(a: StoryState, idx: number): Sampled {
     return {
       bx: a.batPosition[0], by: a.batPosition[1], bz: a.batPosition[2],
       brx: a.batRotation[0], bry: a.batRotation[1], brz: a.batRotation[2],
@@ -155,25 +133,13 @@ function sampleStory(scroll: number): SampledState {
       cx: a.cameraPosition[0], cy: a.cameraPosition[1], cz: a.cameraPosition[2],
       crx: a.cameraRotation[0], cry: a.cameraRotation[1], crz: a.cameraRotation[2],
       lightIntensity: a.lightIntensity, fogDensity: a.fogDensity,
-      flapAmp: a.flapAmp, flapHz: a.flapHz, storyIdx: 0,
+      flapAmp: a.flapAmp, storyIdx: idx,
     }
   }
 
-  /* Clamp to last */
-  if (scroll >= s[s.length - 1].progress) {
-    const a = s[s.length - 1]
-    return {
-      bx: a.batPosition[0], by: a.batPosition[1], bz: a.batPosition[2],
-      brx: a.batRotation[0], bry: a.batRotation[1], brz: a.batRotation[2],
-      bScale: a.batScale, batOpacity: a.batOpacity,
-      cx: a.cameraPosition[0], cy: a.cameraPosition[1], cz: a.cameraPosition[2],
-      crx: a.cameraRotation[0], cry: a.cameraRotation[1], crz: a.cameraRotation[2],
-      lightIntensity: a.lightIntensity, fogDensity: a.fogDensity,
-      flapAmp: a.flapAmp, flapHz: a.flapHz, storyIdx: s.length - 1,
-    }
-  }
+  if (scroll <= s[0].progress)                return fromState(s[0], 0)
+  if (scroll >= s[s.length - 1].progress)     return fromState(s[s.length - 1], s.length - 1)
 
-  /* Find surrounding pair */
   let i = 0
   while (i < s.length - 1 && s[i + 1].progress <= scroll) i++
   const a = s[i], b = s[i + 1]
@@ -186,61 +152,52 @@ function sampleStory(scroll: number): SampledState {
     brx:   lerp(a.batRotation[0],    b.batRotation[0],    t),
     bry:   lerp(a.batRotation[1],    b.batRotation[1],    t),
     brz:   lerp(a.batRotation[2],    b.batRotation[2],    t),
-    bScale:      lerp(a.batScale,        b.batScale,          t),
-    batOpacity:  lerp(a.batOpacity,      b.batOpacity,        t),
+    bScale:         lerp(a.batScale,        b.batScale,        t),
+    batOpacity:     lerp(a.batOpacity,      b.batOpacity,      t),
     cx:    lerp(a.cameraPosition[0], b.cameraPosition[0], t),
     cy:    lerp(a.cameraPosition[1], b.cameraPosition[1], t),
     cz:    lerp(a.cameraPosition[2], b.cameraPosition[2], t),
     crx:   lerp(a.cameraRotation[0], b.cameraRotation[0], t),
     cry:   lerp(a.cameraRotation[1], b.cameraRotation[1], t),
     crz:   lerp(a.cameraRotation[2], b.cameraRotation[2], t),
-    lightIntensity: lerp(a.lightIntensity, b.lightIntensity, t),
-    fogDensity:     lerp(a.fogDensity,     b.fogDensity,     t),
-    flapAmp: lerp(a.flapAmp, b.flapAmp, t),
-    flapHz:  lerp(a.flapHz,  b.flapHz,  t),
+    lightIntensity: lerp(a.lightIntensity,  b.lightIntensity,  t),
+    fogDensity:     lerp(a.fogDensity,      b.fogDensity,      t),
+    flapAmp:        lerp(a.flapAmp,         b.flapAmp,         t),
     storyIdx: i,
   }
 }
 
+/* ── Particles config ───────────────────────────────────────────────────────── */
+const N_PART = 200
+
 /* ── Component ──────────────────────────────────────────────────────────────── */
 export function BatFlyer() {
-  const canvasRef      = useRef<HTMLCanvasElement>(null)
-  const atmosphereRef  = useRef<HTMLDivElement>(null)
-  const textWrapRef    = useRef<HTMLDivElement>(null)
-  const textLabelRef   = useRef<HTMLSpanElement>(null)
-  const textCopyRef    = useRef<HTMLSpanElement>(null)
+  const canvasRef     = useRef<HTMLCanvasElement>(null)
+  const atmosphereRef = useRef<HTMLDivElement>(null)
+  const textWrapRef   = useRef<HTMLDivElement>(null)
+  const textLabelRef  = useRef<HTMLSpanElement>(null)
+  const textCopyRef   = useRef<HTMLSpanElement>(null)
   const scrollProgress = useScrollProgress()
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    /* ── Device capability flags ── */
-    const isMobile          = window.matchMedia('(max-width: 640px)').matches
-    const reducedMotion     = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const scaleMul          = isMobile ? 0.65 : 1.0
+    /* ── Device flags ── */
+    const isMobile      = window.matchMedia('(max-width: 640px)').matches
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const scaleMul      = isMobile ? 0.65 : 1.0
 
     /* ── Renderer ── */
-    const renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: !isMobile,
-      alpha: true,
-    })
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile, alpha: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2))
     renderer.setClearColor(0x000000, 0)
 
     /* ── Scene / Camera ── */
     const scene  = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(65, 1, 0.01, 100)
-
-    /* Fog — density controlled by scroll story */
-    scene.fog = new THREE.FogExp2(0x06080d, STORY[0].fogDensity)
-
-    camera.position.set(
-      STORY[0].cameraPosition[0],
-      STORY[0].cameraPosition[1],
-      STORY[0].cameraPosition[2],
-    )
+    scene.fog    = new THREE.FogExp2(0x06080d, STORY[0].fogDensity)
+    camera.position.set(...STORY[0].cameraPosition)
 
     /* ── Resize ── */
     function resize() {
@@ -253,7 +210,12 @@ export function BatFlyer() {
     resize()
     window.addEventListener('resize', resize)
 
-    /* ── Lighting ── */
+    /* ── Lighting ─────────────────────────────────────────────────────────────
+       1. Ambient       — very dark blue-violet, always on
+       2. Moon (dir)    — cool blue-purple from upper left, intensity via story
+       3. Rim (point)   — violet, trails bat from behind
+       4. Fill (point)  — warm amber from below, atmospheric base
+       5. Accent (point)— teal, follows bat from front, scales with opacity     */
     scene.add(new THREE.AmbientLight(0x0d0822, 0.85))
 
     const moonLight = new THREE.DirectionalLight(0x3d5bb8, STORY[0].lightIntensity)
@@ -261,143 +223,117 @@ export function BatFlyer() {
     scene.add(moonLight)
 
     const rimLight = new THREE.PointLight(0x6a28ff, 8.0, 18)
-    rimLight.position.set(0, 1, 3)
     scene.add(rimLight)
 
-    /* ── Geometry / material pools (tracked for disposal) ── */
-    const matPool: THREE.Material[]       = []
-    const geoPool: THREE.BufferGeometry[] = []
-    function trackGeo<G extends THREE.BufferGeometry>(g: G): G { geoPool.push(g); return g }
+    const fillLight = new THREE.PointLight(0x3d1a00, 2.2, 14)
+    fillLight.position.set(0, -3, 0)
+    scene.add(fillLight)
 
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color:             new THREE.Color(0x060412),
-      emissive:          new THREE.Color(0x1e0948),
-      emissiveIntensity: 0.60,
-      roughness:         0.88,
-      metalness:         0.04,
-    })
-    matPool.push(bodyMat)
+    const accentLight = new THREE.PointLight(0x00e8c8, 3.5, 10)
+    scene.add(accentLight)
 
-    const wingMat = new THREE.MeshStandardMaterial({
-      color:             new THREE.Color(0x050310),
-      emissive:          new THREE.Color(0x160635),
-      emissiveIntensity: 0.50,
-      roughness:         0.92,
-      metalness:         0.02,
+    /* ── Bat material — replaces the GLB's default grey lambert1 ── */
+    const batMat = new THREE.MeshStandardMaterial({
+      color:             new THREE.Color(0x080318),
+      emissive:          new THREE.Color(0x1d0545),
+      emissiveIntensity: 0.70,
+      roughness:         0.84,
+      metalness:         0.05,
       side:              THREE.DoubleSide,
       transparent:       true,
-      opacity:           0.90,
-    })
-    matPool.push(wingMat)
-
-    const boneMat = new THREE.MeshStandardMaterial({
-      color:             new THREE.Color(0x0a0620),
-      emissive:          new THREE.Color(0x301262),
-      emissiveIntensity: 0.85,
-      roughness:         0.80,
-      metalness:         0.05,
-    })
-    matPool.push(boneMat)
-
-    /* ── Bat anatomy ─────────────────────────────────────────────────────────── */
-    const bat = new THREE.Group()
-    scene.add(bat)
-
-    /* Body — capsule aligned along z */
-    const bodyGeo = trackGeo(new THREE.CapsuleGeometry(0.065, 0.12, 5, 10))
-    bodyGeo.rotateX(Math.PI / 2)
-    bat.add(new THREE.Mesh(bodyGeo, bodyMat))
-
-    /* Head — elongated forward */
-    const headGeo = trackGeo(new THREE.SphereGeometry(0.07, 12, 8))
-    headGeo.scale(0.9, 0.88, 1.15)
-    const headMesh = new THREE.Mesh(headGeo, bodyMat)
-    headMesh.position.set(0, 0.018, 0.21)
-    bat.add(headMesh)
-
-    /* Ears — tall, tapered */
-    ;([-1, 1] as const).forEach((side) => {
-      const earGeo = trackGeo(new THREE.ConeGeometry(0.020, 0.10, 4))
-      const ear    = new THREE.Mesh(earGeo, bodyMat)
-      ear.position.set(side * 0.044, 0.10, 0.20)
-      ear.rotation.z = side * 0.26
-      ear.rotation.x = -0.10
-      bat.add(ear)
+      opacity:           1.0,
     })
 
-    /* ── Wing factory ─────────────────────────────────────────────────────────
-       Membrane bezier + CylinderGeometry bone struts + thumb hook.            */
-    function makeMembraneShape(): THREE.Shape {
-      const s = new THREE.Shape()
-      s.moveTo(0, 0)
-      s.bezierCurveTo( 0.08, 0.04,  0.22, 0.08,  0.34, 0.09)
-      s.bezierCurveTo( 0.54, 0.11,  0.72, 0.08,  0.84, 0.04)
-      s.bezierCurveTo( 0.88, 0.02,  0.89,-0.02,  0.86,-0.06)
-      s.bezierCurveTo( 0.80,-0.09,  0.72,-0.10,  0.70,-0.10)
-      s.bezierCurveTo( 0.64,-0.14,  0.56,-0.18,  0.54,-0.18)
-      s.bezierCurveTo( 0.38,-0.24,  0.18,-0.27,  0.08,-0.23)
-      s.bezierCurveTo( 0.02,-0.18,  0,   -0.09,  0,     0  )
-      return s
+    /* ── Bat group — receives story position/rotation/scale ── */
+    const batGroup = new THREE.Group()
+    scene.add(batGroup)
+
+    /* ── Particle system ──────────────────────────────────────────────────────
+       200 motes trailing the bat. Each has a fixed random offset that drifts
+       slowly; the whole cloud follows batGroup position with a 0.05 lag.       */
+    const partPositions = new Float32Array(N_PART * 3)
+    const partOffsets: Array<{ ox: number; oy: number; oz: number; phase: number; speed: number }> = []
+    for (let i = 0; i < N_PART; i++) {
+      partOffsets.push({
+        ox:    (Math.random() - 0.5) * 2.4,
+        oy:    (Math.random() - 0.5) * 1.6,
+        oz:    (Math.random() - 0.5) * 2.0,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.18 + Math.random() * 0.32,
+      })
+      partPositions[i * 3]     = 0
+      partPositions[i * 3 + 1] = 0
+      partPositions[i * 3 + 2] = 0
     }
-
-    function makeStrut(x1: number, y1: number, x2: number, y2: number, r: number): THREE.Mesh {
-      const from = new THREE.Vector3(x1, y1, 0.006)
-      const to   = new THREE.Vector3(x2, y2, 0.008)
-      const len  = from.distanceTo(to)
-      const geo  = trackGeo(new THREE.CylinderGeometry(r * 0.55, r, len, 4, 1))
-      const mesh = new THREE.Mesh(geo, boneMat)
-      mesh.position.copy(from).lerp(to, 0.5)
-      mesh.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        to.clone().sub(from).normalize(),
-      )
-      return mesh
-    }
-
-    function buildWing(): THREE.Group {
-      const shoulder = new THREE.Group()
-      const memGeo   = trackGeo(new THREE.ShapeGeometry(makeMembraneShape(), 14))
-      shoulder.add(new THREE.Mesh(memGeo, wingMat))
-      shoulder.add(makeStrut(0,    0,    0.16, 0.04, 0.008))  /* humerus */
-      shoulder.add(makeStrut(0.16, 0.04, 0.34, 0.09, 0.007))  /* radius  */
-      shoulder.add(makeStrut(0.34, 0.09, 0.84, 0.04, 0.006))  /* digit-2 */
-      shoulder.add(makeStrut(0.34, 0.09, 0.70,-0.10, 0.005))  /* digit-3 */
-      shoulder.add(makeStrut(0.34, 0.09, 0.54,-0.18, 0.004))  /* digit-4 */
-      const thumbGeo = trackGeo(new THREE.ConeGeometry(0.010, 0.050, 4))
-      const thumb    = new THREE.Mesh(thumbGeo, bodyMat)
-      thumb.position.set(0.34, 0.20, 0.010)
-      thumb.rotation.z = -0.22
-      shoulder.add(thumb)
-      return shoulder
-    }
-
-    /* Shoulder pivots — rotate for flapping */
-    const rPivot = new THREE.Group()
-    rPivot.position.set(0.055, 0, 0)
-    rPivot.add(buildWing())
-    bat.add(rPivot)
-
-    const lPivot = new THREE.Group()
-    lPivot.position.set(-0.055, 0, 0)
-    lPivot.scale.x = -1          /* mirror */
-    lPivot.add(buildWing())
-    bat.add(lPivot)
-
-    /* ── Pre-collect meshes for opacity (no per-frame traverse) ── */
-    interface MeshEntry { mat: THREE.MeshStandardMaterial; baseOpacity: number }
-    const batMeshes: MeshEntry[] = []
-    bat.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial
-        batMeshes.push({ mat, baseOpacity: mat.opacity })
-        mat.transparent = true
-      }
+    const partGeo = new THREE.BufferGeometry()
+    partGeo.setAttribute('position', new THREE.BufferAttribute(partPositions, 3))
+    const partMat = new THREE.PointsMaterial({
+      size:         0.032,
+      color:        new THREE.Color(0x9a8cff),
+      transparent:  true,
+      opacity:      0,
+      depthWrite:   false,
+      blending:     THREE.AdditiveBlending,
+      sizeAttenuation: true,
     })
+    const particles = new THREE.Points(partGeo, partMat)
+    scene.add(particles)
 
-    /* ── Static refs ── */
-    const _scrollContent = document.getElementById('scroll-content')
+    /* ── GLB loading ─────────────────────────────────────────────────────────
+       DRACO-compressed model — set decoder path to /draco/ (public folder).   */
+    let batReady    = false
+    let mixer:  THREE.AnimationMixer | null = null
+    let action: THREE.AnimationAction | null = null
+    let batMeshes:  Array<{ mat: THREE.MeshStandardMaterial }> = []
 
-    /* ── Camera lag state — current position that lerps toward target ── */
+    const dracoLoader = new DRACOLoader()
+    dracoLoader.setDecoderPath('/draco/')
+
+    const gltfLoader = new GLTFLoader()
+    gltfLoader.setDRACOLoader(dracoLoader)
+
+    gltfLoader.load(
+      '/bat.glb',
+      (gltf) => {
+        /* Apply custom material to every mesh */
+        gltf.scene.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh
+            mesh.material = batMat
+            batMeshes.push({ mat: batMat })
+          }
+        })
+
+        batGroup.add(gltf.scene)
+
+        /* AnimationMixer — play the 0.3 s wing-flap loop */
+        if (gltf.animations.length > 0) {
+          mixer  = new THREE.AnimationMixer(gltf.scene)
+          action = mixer.clipAction(gltf.animations[0])
+          action.play()
+        }
+
+        batReady = true
+
+        /* Reduced-motion: one static frame then stop */
+        if (reducedMotion) {
+          const st = STORY[2]
+          batGroup.position.set(...st.batPosition)
+          batGroup.rotation.set(...st.batRotation, 'YXZ')
+          batGroup.scale.setScalar(st.batScale * scaleMul)
+          camera.position.set(...st.cameraPosition)
+          camera.rotation.set(...st.cameraRotation, 'YXZ')
+          moonLight.intensity = st.lightIntensity
+          ;(scene.fog as THREE.FogExp2).density = st.fogDensity
+          batMat.opacity = st.batOpacity
+          renderer.render(scene, camera)
+        }
+      },
+      undefined,
+      (err) => { console.error('BatFlyer: GLB load failed —', err) },
+    )
+
+    /* ── Camera lag state ── */
     let ccx  = STORY[0].cameraPosition[0]
     let ccy  = STORY[0].cameraPosition[1]
     let ccz  = STORY[0].cameraPosition[2]
@@ -405,36 +341,32 @@ export function BatFlyer() {
     let ccry = STORY[0].cameraRotation[1]
     let ccrz = STORY[0].cameraRotation[2]
 
+    /* ── Particle lag ── */
+    let pcx = STORY[0].batPosition[0]
+    let pcy = STORY[0].batPosition[1]
+    let pcz = STORY[0].batPosition[2]
+
     /* ── Text tracking ── */
     let lastTextIdx = -1
 
-    /* ────────────────────────────────────────────────────────────────────────
-       REDUCED-MOTION PATH — single static render at story[2], no RAF         */
+    /* Reduced-motion path exits before RAF */
     if (reducedMotion) {
-      const st = STORY[2]
-      bat.position.set(st.batPosition[0], st.batPosition[1], st.batPosition[2])
-      bat.rotation.set(st.batRotation[0], st.batRotation[1], st.batRotation[2], 'YXZ')
-      bat.scale.setScalar(st.batScale * scaleMul)
-      camera.position.set(st.cameraPosition[0], st.cameraPosition[1], st.cameraPosition[2])
-      camera.rotation.set(st.cameraRotation[0], st.cameraRotation[1], st.cameraRotation[2], 'YXZ')
-      moonLight.intensity = st.lightIntensity
-      ;(scene.fog as THREE.FogExp2).density = st.fogDensity
-      batMeshes.forEach(({ mat, baseOpacity }) => { mat.opacity = baseOpacity * st.batOpacity })
-      renderer.render(scene, camera)
-
       return () => {
         window.removeEventListener('resize', resize)
-        geoPool.forEach((g) => g.dispose())
-        matPool.forEach((m) => m.dispose())
+        partGeo.dispose()
+        partMat.dispose()
+        batMat.dispose()
         renderer.dispose()
+        dracoLoader.dispose()
       }
     }
 
-    /* ────────────────────────────────────────────────────────────────────────
-       ANIMATION LOOP                                                          */
-    let raf:             number
-    let accumulatedTime  = 0
-    let lastNow          = performance.now()
+    /* ── Animation loop ─────────────────────────────────────────────────────── */
+    let raf:            number
+    let accumulatedTime = 0
+    let lastNow         = performance.now()
+
+    const _scrollContent = document.getElementById('scroll-content')
 
     function animate(now: number) {
       raf = requestAnimationFrame(animate)
@@ -446,35 +378,27 @@ export function BatFlyer() {
       const scroll = Math.max(0, Math.min(1, scrollProgress.current))
       const kf     = sampleStory(scroll)
 
-      /* ── Bat transform ── */
-      bat.position.set(kf.bx, kf.by, kf.bz)
-      bat.rotation.set(kf.brx, kf.bry, kf.brz, 'YXZ')
-      bat.scale.setScalar(kf.bScale * scaleMul)
+      /* ── AnimationMixer — speed proportional to flap intensity ── */
+      if (mixer) {
+        mixer.update(dt)
+        if (action) action.timeScale = 0.7 + kf.flapAmp * 1.6
+      }
 
-      /* ── Wing flap ──────────────────────────────────────────────────────────
-         Primary z-rotation (up/down flap) + forward x-sweep (phase-lagged)
-         Fold on upstroke: outer wing crumples, as real bat wings do.          */
-      const phase  = accumulatedTime * kf.flapHz * Math.PI * 2
-      const flapZ  =  Math.sin(phase)        * kf.flapAmp
-      const sweepX =  Math.sin(phase - 0.35) * kf.flapAmp * 0.14
-      const fold   = Math.max(0, flapZ) * 0.28
+      /* ── Bat: story position + procedural floating ── */
+      if (batReady) {
+        const floatY    = Math.sin(accumulatedTime * 0.42) * 0.06
+        const floatX    = Math.cos(accumulatedTime * 0.29) * 0.025
+        const floatRoll = Math.sin(accumulatedTime * 0.35) * 0.018
 
-      rPivot.rotation.z = flapZ;   rPivot.rotation.x = sweepX
-      lPivot.rotation.z = -flapZ;  lPivot.rotation.x = sweepX
+        batGroup.position.set(kf.bx + floatX, kf.by + floatY, kf.bz)
+        batGroup.rotation.set(kf.brx, kf.bry, kf.brz + floatRoll, 'YXZ')
+        batGroup.scale.setScalar(kf.bScale * scaleMul)
 
-      const rWing = rPivot.children[0] as THREE.Group
-      const lWing = lPivot.children[0] as THREE.Group
-      if (rWing) rWing.rotation.z =  fold
-      if (lWing) lWing.rotation.z = -fold
+        /* Overall opacity */
+        batMat.opacity = kf.batOpacity
+      }
 
-      /* ── Opacity — combined flap modulation × overall batOpacity ── */
-      const wingFlap = THREE.MathUtils.clamp(0.90 - kf.flapAmp * 0.08, 0.78, 0.92)
-      batMeshes.forEach(({ mat, baseOpacity }) => {
-        const base = mat === wingMat ? wingFlap : baseOpacity
-        mat.opacity = base * kf.batOpacity
-      })
-
-      /* ── Camera — cinematic lag toward story target ── */
+      /* ── Camera — cinematic lag + mouse parallax ── */
       const camF = 0.028
       ccx  = lerp(ccx,  kf.cx,  camF)
       ccy  = lerp(ccy,  kf.cy,  camF)
@@ -482,58 +406,78 @@ export function BatFlyer() {
       ccrx = lerp(ccrx, kf.crx, camF)
       ccry = lerp(ccry, kf.cry, camF)
       ccrz = lerp(ccrz, kf.crz, camF)
-      camera.position.set(ccx, ccy, ccz)
+
+      /* Mouse parallax — ±0.06 / ±0.04 on top of cinematic lag */
+      const mx = mousePos.active ? (mousePos.x / window.innerWidth  - 0.5) * 2 : 0
+      const my = mousePos.active ? (mousePos.y / window.innerHeight - 0.5) * 2 : 0
+      camera.position.set(ccx + mx * 0.06, ccy - my * 0.04, ccz)
       camera.rotation.set(ccrx, ccry, ccrz, 'YXZ')
 
-      /* ── Fog density ── */
+      /* ── Fog ── */
       ;(scene.fog as THREE.FogExp2).density = kf.fogDensity
 
-      /* ── Moonlight intensity follows story ── */
+      /* ── Lighting ── */
       moonLight.intensity = kf.lightIntensity
-
-      /* ── Rim light — stays behind bat relative to camera ── */
       rimLight.position.set(kf.bx - 0.5, kf.by + 0.9, kf.bz - 2.2)
+      rimLight.intensity = 6 + kf.batOpacity * 4
+
+      /* Accent light: teal front light, follows bat, fades with opacity */
+      accentLight.position.set(kf.bx + 0.6, kf.by + 0.2, kf.bz + 1.4)
+      accentLight.intensity = kf.batOpacity * 3.5
+
+      /* Fill light: lerp vertically to stay below bat */
+      fillLight.position.y = lerp(fillLight.position.y, kf.by - 2.2, 0.04)
+
+      /* ── Particles ── */
+      pcx = lerp(pcx, kf.bx, 0.05)
+      pcy = lerp(pcy, kf.by, 0.05)
+      pcz = lerp(pcz, kf.bz, 0.05)
+
+      for (let i = 0; i < N_PART; i++) {
+        const p = partOffsets[i]
+        const t = accumulatedTime * p.speed + p.phase
+        partPositions[i * 3]     = pcx + p.ox + Math.sin(t)              * 0.08
+        partPositions[i * 3 + 1] = pcy + p.oy + Math.cos(t * 0.73)       * 0.05
+        partPositions[i * 3 + 2] = pcz + p.oz + Math.sin(t * 0.51 + 1.2) * 0.07
+      }
+      partGeo.attributes.position.needsUpdate = true
+      partMat.opacity = 0.28 * kf.batOpacity
 
       /* ── Atmosphere overlay ── */
       const presence = THREE.MathUtils.clamp(
-        kf.batOpacity * Math.max(0, (kf.bz + 1.2) / 2.8),
-        0, 1,
+        kf.batOpacity * Math.max(0, (kf.bz + 1.2) / 2.8), 0, 1,
       )
       if (atmosphereRef.current) {
         atmosphereRef.current.style.opacity = (presence * 0.60).toFixed(3)
       }
 
-      /* ── Scroll-content filter: dims + tints when bat is near ── */
+      /* ── Scroll-content filter ── */
       if (_scrollContent) {
         if (presence > 0.04) {
-          const brightness = (1 - presence * 0.14).toFixed(3)
-          const hue        = (presence * 9).toFixed(1)
-          _scrollContent.style.filter = `brightness(${brightness}) hue-rotate(${hue}deg)`
+          _scrollContent.style.filter =
+            `brightness(${(1 - presence * 0.14).toFixed(3)}) hue-rotate(${(presence * 9).toFixed(1)}deg)`
         } else {
           _scrollContent.style.filter = ''
         }
       }
 
-      /* ── Narrative text ─────────────────────────────────────────────────────
-         Each story segment gets its own text beat.
-         Envelope: fade in over first 20%, hold 20–80%, fade out last 20%.
-         Vertical slide: enters from +12 px, exits to -12 px.                  */
+      /* ── Narrative text ────────────────────────────────────────────────────
+         Fade/slide envelope per segment: 20 % in / 60 % hold / 20 % out.     */
       const idx      = kf.storyIdx
       const segStart = STORY[idx].progress
       const segEnd   = idx < STORY.length - 1 ? STORY[idx + 1].progress : segStart + 0.001
       const localT   = Math.min(1, (scroll - segStart) / (segEnd - segStart))
 
-      let textOpacity: number
-      if (localT < 0.20)      textOpacity = localT / 0.20
-      else if (localT < 0.80) textOpacity = 1
-      else                    textOpacity = 1 - (localT - 0.80) / 0.20
+      const textOpacity =
+        localT < 0.20 ? localT / 0.20
+        : localT < 0.80 ? 1
+        : 1 - (localT - 0.80) / 0.20
 
-      const textY: number =
+      const textY =
         localT < 0.20 ? (1 - localT / 0.20) * 12
         : localT > 0.80 ? -((localT - 0.80) / 0.20) * 12
         : 0
 
-      /* Update DOM content only when segment changes */
       if (idx !== lastTextIdx) {
         lastTextIdx = idx
         if (textLabelRef.current) textLabelRef.current.textContent = `§ ${ROMAN[idx]}`
@@ -555,15 +499,18 @@ export function BatFlyer() {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
       if (_scrollContent) _scrollContent.style.filter = ''
-      geoPool.forEach((g) => g.dispose())
-      matPool.forEach((m) => m.dispose())
+      if (mixer) mixer.stopAllAction()
+      partGeo.dispose()
+      partMat.dispose()
+      batMat.dispose()
       renderer.dispose()
+      dracoLoader.dispose()
     }
   }, [])
 
   return (
     <>
-      {/* Transparent WebGL canvas — bat lives here */}
+      {/* WebGL canvas */}
       <canvas
         ref={canvasRef}
         aria-hidden="true"
@@ -577,7 +524,7 @@ export function BatFlyer() {
         }}
       />
 
-      {/* Atmosphere vignette — violet bloom, driven by bat proximity */}
+      {/* Violet vignette — blooms with bat proximity */}
       <div
         ref={atmosphereRef}
         aria-hidden="true"
@@ -591,7 +538,7 @@ export function BatFlyer() {
         }}
       />
 
-      {/* Narrative text overlay — per-segment cinematic copy */}
+      {/* Narrative text overlay */}
       <div
         ref={textWrapRef}
         aria-live="polite"
