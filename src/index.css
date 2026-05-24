@@ -295,23 +295,11 @@ body::after {
   /* Remove custom cursor on touch devices (already handled by @media hover) */
 }
 
-/* ── Signal scene — cinematic keyframes (scoped via .signal-breathe) ─────── */
-@keyframes signal-breathe {
-  0%, 100% { opacity: 0.70; }
-  50%       { opacity: 1.00; }
-}
+/* ── Signal scene — gold bloom drift (used by SignalScene glowRef) ────────── */
 @keyframes signal-drift {
-  0%   { transform: translateY(0px)   scale(1.00); }
-  50%  { transform: translateY(-8px)  scale(1.015); }
-  100% { transform: translateY(0px)   scale(1.00); }
-}
-@keyframes signal-corona-pulse {
-  0%, 100% { opacity: 0.55; transform: scale(1.00); }
-  50%       { opacity: 0.80; transform: scale(1.04); }
-}
-@keyframes signal-ray-sway {
-  0%, 100% { transform: rotate(-2deg) translateX(0px); opacity: 0.45; }
-  50%       { transform: rotate( 2deg) translateX(6px); opacity: 0.70; }
+  0%   { transform: translateY(0px)  scale(1.000); }
+  50%  { transform: translateY(-6px) scale(1.010); }
+  100% { transform: translateY(0px)  scale(1.000); }
 }
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
