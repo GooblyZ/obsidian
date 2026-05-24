@@ -5,7 +5,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { useScrollProgress } from '../../hooks/useScrollProgress'
 import { mousePos }           from '../../lib/mousePosition'
 
-/* ── BatFlyer v7 ─────────────────────────────────────────────────────────────
+/* ── BatFlyer v8 ─────────────────────────────────────────────────────────────
    Real skeletal GLB bat — DRACO-compressed, 177-channel armature.
    GLB: /public/bat.glb  (104 KB · "Armature|Take 001|BaseLayer" · 0.3 s loop)
 
@@ -27,6 +27,15 @@ import { mousePos }           from '../../lib/mousePosition'
    · mouse parallax    — ±0.06 / ±0.04 fine nudge after lag
    · final-section     — IntersectionObserver on #scene-signal; bat slowly follows
                          cursor when "Are you still here?" is visible (desktop only)
+
+   FINAL-SECTION 3D ATMOSPHERE  (all gated by finalBlend, invisible elsewhere)
+   · moonOrb           — giant dark eclipse sphere at Z=-20, radius 3.8
+   · moonCorona        — Sprite with canvas radial-glow texture for eclipse ring
+   · moonHalo          — PointLight behind moon, illuminates fog depth
+   · beamA/B           — two Sprite "god ray" shafts with canvas gradient textures
+   · finalParticles    — 55 (22 mobile) depth-layered ash/dust motes, 3 Z layers
+   · wingTrail         — 16-point ring-buffer of recent bat positions (desktop only)
+   · fog breathing     — sin-wave modulation on fogDensity in the final section
 
    STORY DESIGN  (bat normalized to ~2.2 units wingspan, 65° FOV)
    Distance formula: D = camZ − batZ   fill% ≈ 0.97 / D
@@ -251,6 +260,148 @@ export function BatFlyer() {
     const batGroup = new THREE.Group()
     scene.add(batGroup)
 
+    /* ══════════════════════════════════════════════════════════════════════════
+       FINAL-SECTION ATMOSPHERE
+       Everything below is invisible until finalBlend > 0 (gated each frame).
+       Positioned in deep Z space so they don't interfere with the scroll story.
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    /* ── Moon / eclipse orb ────────────────────────────────────────────────── */
+    const moonOrbGeo = new THREE.SphereGeometry(3.8, 28, 20)
+    const moonOrbMat = new THREE.MeshStandardMaterial({
+      color: 0x01000a, emissive: 0x04010f, emissiveIntensity: 0.6,
+      roughness: 1.0, metalness: 0.0,
+      transparent: true, opacity: 0, depthWrite: false,
+    })
+    const moonOrb = new THREE.Mesh(moonOrbGeo, moonOrbMat)
+    moonOrb.position.set(0.6, 2.4, -20)
+    scene.add(moonOrb)
+
+    /* PointLight behind the sphere — illuminates fog for the eclipse halo */
+    const moonHalo = new THREE.PointLight(0x2a18a0, 0, 55)
+    moonHalo.position.set(0.6, 2.4, -21)
+    scene.add(moonHalo)
+
+    /* Eclipse corona — Sprite with canvas radial-gradient ring texture */
+    const coronaCanvas = document.createElement('canvas')
+    coronaCanvas.width = coronaCanvas.height = 512
+    const coronaCtx = coronaCanvas.getContext('2d')!
+    const cg = coronaCtx.createRadialGradient(256, 256, 80, 256, 256, 256)
+    cg.addColorStop(0,    'rgba(0,0,0,0)')
+    cg.addColorStop(0.28, 'rgba(0,0,0,0)')
+    cg.addColorStop(0.34, 'rgba(100, 65, 230, 0.40)')
+    cg.addColorStop(0.46, 'rgba(65,  30, 170, 0.22)')
+    cg.addColorStop(0.65, 'rgba(30,  10,  80, 0.10)')
+    cg.addColorStop(1,    'rgba(0,0,0,0)')
+    coronaCtx.fillStyle = cg
+    coronaCtx.fillRect(0, 0, 512, 512)
+    const coronaTex  = new THREE.CanvasTexture(coronaCanvas)
+    const moonCorona = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: coronaTex, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    }))
+    moonCorona.scale.set(16, 16, 1)
+    moonCorona.position.copy(moonOrb.position)
+    moonCorona.position.z += 0.5
+    scene.add(moonCorona)
+
+    /* ── Volumetric beams — tall canvas-gradient sprites faking god rays ───── */
+    function makeBeamTex(): THREE.CanvasTexture {
+      const bc = document.createElement('canvas')
+      bc.width = 64; bc.height = 512
+      const bx = bc.getContext('2d')!
+      /* Vertical fade: bright top → transparent bottom */
+      const lg = bx.createLinearGradient(0, 0, 0, 512)
+      lg.addColorStop(0,    'rgba(70, 35, 180, 0.22)')
+      lg.addColorStop(0.55, 'rgba(45, 15, 110, 0.08)')
+      lg.addColorStop(1,    'rgba(0,  0,   0,  0)')
+      bx.fillStyle = lg
+      bx.fillRect(0, 0, 64, 512)
+      /* Feather horizontal edges */
+      const eg = bx.createLinearGradient(0, 0, 64, 0)
+      eg.addColorStop(0,    'rgba(0,0,0,1)')
+      eg.addColorStop(0.22, 'rgba(0,0,0,0)')
+      eg.addColorStop(0.78, 'rgba(0,0,0,0)')
+      eg.addColorStop(1,    'rgba(0,0,0,1)')
+      bx.globalCompositeOperation = 'destination-out'
+      bx.fillStyle = eg
+      bx.fillRect(0, 0, 64, 512)
+      return new THREE.CanvasTexture(bc)
+    }
+    const beamTex  = makeBeamTex()
+    const beamMatA = new THREE.SpriteMaterial({
+      map: beamTex, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    })
+    const beamMatB = new THREE.SpriteMaterial({
+      map: beamTex, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    })
+    const beamA = new THREE.Sprite(beamMatA)
+    beamA.scale.set(1.4, 10, 1)
+    beamA.position.set(-0.4, -1.8, -12)
+    scene.add(beamA)
+    const beamB = new THREE.Sprite(beamMatB)
+    beamB.scale.set(0.9, 7, 1)
+    beamB.position.set(1.6, -1.0, -9)
+    scene.add(beamB)
+
+    /* ── Final-section atmospheric particles (depth-layered ash / dust) ─────── */
+    const FP_N = isMobile ? 22 : 55
+    const fpPos  = new Float32Array(FP_N * 3)
+    const fpData: Array<{ vx: number; vy: number; phase: number; amp: number }> = []
+    for (let i = 0; i < FP_N; i++) {
+      const layer = i % 3   /* 0 = far Z≈-13, 1 = mid Z≈-5.5, 2 = near Z≈-1.8 */
+      const zBase = layer === 0 ? -13 : layer === 1 ? -5.5 : -1.8
+      fpPos[i * 3]     = (Math.random() - 0.5) * 10
+      fpPos[i * 3 + 1] = (Math.random() - 0.5) * 8
+      fpPos[i * 3 + 2] = zBase + (Math.random() - 0.5) * 2.5
+      fpData.push({
+        vx:    (Math.random() - 0.5) * 0.05,
+        vy:    -0.003 - Math.random() * 0.005,
+        phase: Math.random() * Math.PI * 2,
+        amp:   0.5 + Math.random() * 0.5,
+      })
+    }
+    const fpGeo = new THREE.BufferGeometry()
+    fpGeo.setAttribute('position', new THREE.BufferAttribute(fpPos, 3))
+    const fpMat = new THREE.PointsMaterial({
+      size: 0.018, color: new THREE.Color(0xb0a5ff),
+      transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    })
+    const finalParticles = new THREE.Points(fpGeo, fpMat)
+    scene.add(finalParticles)
+
+    /* ── Wing trail — ring-buffer of recent bat-center world positions ───────── */
+    const TRAIL_N  = isMobile ? 0 : 16
+    const trailPos = new Float32Array(Math.max(TRAIL_N, 1) * 3)
+    /* Initialise to STORY[5] bat position so there is no pop-in */
+    for (let i = 0; i < Math.max(TRAIL_N, 1); i++) {
+      trailPos[i * 3]     = STORY[5].batPosition[0]
+      trailPos[i * 3 + 1] = STORY[5].batPosition[1]
+      trailPos[i * 3 + 2] = STORY[5].batPosition[2]
+    }
+    const trailGeo = new THREE.BufferGeometry()
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3))
+    const trailMat = new THREE.PointsMaterial({
+      size: 0.048, color: new THREE.Color(0x7060d0),
+      transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    })
+    const wingTrail = new THREE.Points(trailGeo, trailMat)
+    scene.add(wingTrail)
+    let trailSkip = 0
+
+    /* All final-section objects start invisible — revealed only by finalBlend */
+    moonOrb.visible = false; moonCorona.visible = false
+    beamA.visible = false; beamB.visible = false
+    finalParticles.visible = false; wingTrail.visible = false
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       END FINAL-SECTION ATMOSPHERE
+       ══════════════════════════════════════════════════════════════════════════ */
+
     /* ── GLB loading ─────────────────────────────────────────────────────────
        After load:
          1. Override material on every mesh
@@ -459,7 +610,9 @@ export function BatFlyer() {
       camera.rotation.set(ccrx, ccry, ccrz, 'YXZ')
 
       /* ── Scene globals ── */
-      ;(scene.fog as THREE.FogExp2).density = kf.fogDensity
+      /* Fog: normal story density; in final section overlay a slow breathing pulse */
+      const breatheFog = kf.fogDensity + 0.005 + Math.sin(accumulatedTime * 0.38) * 0.002
+      ;(scene.fog as THREE.FogExp2).density = lerp(kf.fogDensity, breatheFog, finalBlend)
       moonLight.intensity = kf.lightIntensity
 
       /* Lights follow the blended bat position so they stay correct in both modes */
@@ -474,6 +627,65 @@ export function BatFlyer() {
       accentLight.intensity = lerp(kf.batOpacity, 1.0, finalBlend) * 3.5
 
       fillLight.position.y = lerp(fillLight.position.y, ly - 2.2, 0.04)
+
+      /* ── Final-section 3D atmosphere ─────────────────────────────────────── */
+      if (finalBlend > 0.002) {
+        /* Moon orb: fade in, slow lateral drift */
+        moonOrbMat.opacity     = finalBlend * 0.94
+        moonCorona.material.opacity = finalBlend * 0.72
+        moonHalo.intensity     = finalBlend * 11
+        const moonDrift = Math.sin(accumulatedTime * 0.11) * 0.06
+        moonOrb.position.x    = 0.6 + moonDrift
+        moonHalo.position.x   = moonOrb.position.x
+        moonCorona.position.x = moonOrb.position.x
+
+        /* God-ray beams: slow sway left and right */
+        beamMatA.opacity = finalBlend * 0.52
+        beamMatB.opacity = finalBlend * 0.36
+        beamA.position.x = -0.4 + Math.sin(accumulatedTime * 0.08) * 0.18
+        beamB.position.x =  1.6 + Math.cos(accumulatedTime * 0.13) * 0.14
+
+        /* Atmospheric particles: slow downward drift with horizontal wander */
+        for (let i = 0; i < FP_N; i++) {
+          const d = fpData[i]
+          fpPos[i * 3]     += d.vx * dt * d.amp + Math.sin(accumulatedTime * 0.5 + d.phase) * 0.0006
+          fpPos[i * 3 + 1] += d.vy * dt
+          if (fpPos[i * 3 + 1] < -5) fpPos[i * 3 + 1] += 10   /* vertical wrap */
+          if (fpPos[i * 3]     >  7)  fpPos[i * 3]     -= 14   /* horizontal wrap */
+          if (fpPos[i * 3]     < -7)  fpPos[i * 3]     += 14
+        }
+        fpGeo.attributes.position.needsUpdate = true
+        fpMat.opacity = finalBlend * 0.38
+
+        /* Wing trail: shift ring buffer, write current bat position at head */
+        if (TRAIL_N > 0) {
+          trailSkip++
+          if (trailSkip >= 2) {
+            trailSkip = 0
+            for (let i = TRAIL_N - 1; i > 0; i--) {
+              trailPos[i * 3]     = trailPos[(i - 1) * 3]
+              trailPos[i * 3 + 1] = trailPos[(i - 1) * 3 + 1]
+              trailPos[i * 3 + 2] = trailPos[(i - 1) * 3 + 2]
+            }
+            trailPos[0] = batGroup.position.x
+            trailPos[1] = batGroup.position.y
+            trailPos[2] = batGroup.position.z
+            trailGeo.attributes.position.needsUpdate = true
+          }
+          trailMat.opacity = finalBlend * 0.42
+        }
+
+        /* Make the objects visible when blending in */
+        moonOrb.visible = true; moonCorona.visible = true
+        beamA.visible = true; beamB.visible = true
+        finalParticles.visible = true
+        wingTrail.visible = TRAIL_N > 0
+      } else {
+        /* Hide completely to avoid phantom draw calls during the scroll story */
+        moonOrb.visible = false; moonCorona.visible = false
+        beamA.visible = false; beamB.visible = false
+        finalParticles.visible = false; wingTrail.visible = false
+      }
 
       /* ── Atmosphere overlay ── */
       const presence = THREE.MathUtils.clamp(
@@ -526,6 +738,12 @@ export function BatFlyer() {
       signalObserver.disconnect()
       if (_sc) _sc.style.filter = ''
       if (mixer) mixer.stopAllAction()
+      /* Final-section objects */
+      moonOrbGeo.dispose(); moonOrbMat.dispose()
+      coronaTex.dispose(); moonCorona.material.dispose()
+      beamTex.dispose(); beamMatA.dispose(); beamMatB.dispose()
+      fpGeo.dispose(); fpMat.dispose()
+      trailGeo.dispose(); trailMat.dispose()
       batMat.dispose()
       renderer.dispose(); dracoLoader.dispose()
     }

@@ -3,8 +3,8 @@ import { gsap, ScrollTrigger } from '../../lib/gsap'
 
 /* Scene 05 — SIGNAL
    The closing transmission. A question rises from dark.
-   Behind it: a barely visible stream of archive coordinates — the machine
-   still processing even as the user departs.
+   Enhanced with layered cinematic atmosphere: depth vignettes, breathing glow,
+   void rings, and motion-layered overlays — all scoped to this section only.
    Gold warmth blooms upward. Gradient title. Minimal CTA pill.              */
 
 /* Data stream — 18 rows of archival coordinates at very low opacity */
@@ -22,31 +22,41 @@ export function SignalScene() {
   const subtitleRef = useRef<HTMLParagraphElement>(null)
   const ctaRef      = useRef<HTMLDivElement>(null)
   const creditRef   = useRef<HTMLParagraphElement>(null)
+  /* Atmospheric depth refs */
+  const voidRef     = useRef<HTMLDivElement>(null)
+  const rimRef      = useRef<HTMLDivElement>(null)
+  const depthRef    = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const ctx = gsap.context(() => {
       const items = [labelRef, titleRef, subtitleRef, ctaRef].map(r => r.current).filter(Boolean)
       gsap.set(items, { opacity: 0, y: 36 })
       gsap.set([glowRef.current, creditRef.current, streamRef.current], { opacity: 0 })
+      gsap.set([voidRef.current, rimRef.current, depthRef.current], { opacity: 0 })
 
       ScrollTrigger.create({
         trigger: sectionRef.current,
         start: 'top 70%',
         onEnter() {
-          /* Data stream fades in first — sets the mood */
-          gsap.to(streamRef.current, { opacity: 1, duration: 2.4, ease: 'power2.out' })
-          gsap.to(glowRef.current,   { opacity: 1, duration: 3.2, ease: 'power2.out', delay: 0.2 })
+          /* Depth atmosphere surfaces first */
+          gsap.to(depthRef.current, { opacity: 1, duration: 3.8, ease: 'power2.out' })
+          gsap.to(voidRef.current,  { opacity: 1, duration: 4.2, ease: 'power2.out', delay: 0.3 })
+          gsap.to(rimRef.current,   { opacity: 1, duration: 3.0, ease: 'power2.out', delay: 0.6 })
 
-          /* Content surfaces through the data */
+          /* Data stream and glow */
+          gsap.to(streamRef.current, { opacity: 1, duration: 2.4, ease: 'power2.out', delay: 0.2 })
+          gsap.to(glowRef.current,   { opacity: 1, duration: 3.2, ease: 'power2.out', delay: 0.4 })
+
+          /* Content surfaces through */
           gsap.to(items, {
             opacity: 1, y: 0,
-            duration: 1.6, stagger: 0.22, ease: 'power3.out', delay: 0.6,
+            duration: 1.6, stagger: 0.22, ease: 'power3.out', delay: 0.8,
           })
-          gsap.to(creditRef.current, { opacity: 0.25, duration: 2, ease: 'power2.out', delay: 1.4 })
+          gsap.to(creditRef.current, { opacity: 0.25, duration: 2, ease: 'power2.out', delay: 1.6 })
         },
       })
 
-      /* Data stream scroll animation — rows drift upward slowly */
+      /* Data stream scroll drift — rows move upward slowly */
       ScrollTrigger.create({
         trigger: sectionRef.current,
         start: 'top bottom',
@@ -83,20 +93,66 @@ export function SignalScene() {
         overflow: 'hidden',
       }}
     >
-      {/* Data stream — very low opacity, barely visible behind content */}
+      {/* ── Layer 0: deep spatial background ────────────────────────────────── */}
+      {/* Far-field depth gradient — navy void at the back of the scene */}
+      <div
+        ref={depthRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0,
+          background: [
+            'radial-gradient(ellipse 90% 70% at 50% 50%, rgba(4,2,18,0.80) 0%, transparent 70%)',
+            'radial-gradient(ellipse 60% 55% at 50% 20%, rgba(8,3,28,0.55) 0%, transparent 60%)',
+          ].join(', '),
+        }}
+      />
+
+      {/* ── Layer 1: void eclipse ring ───────────────────────────────────────── */}
+      {/* Dark center with a violet rim — mirrors the Three.js moon orb in CSS  */}
+      <div
+        ref={voidRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: '50%', left: '50%',
+          transform: 'translate(-50%, -62%)',
+          width: 'min(55vw, 420px)', height: 'min(55vw, 420px)',
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(1,0,8,0.70) 0%, rgba(1,0,10,0.65) 45%, transparent 72%)',
+          boxShadow: [
+            '0 0 0 1px rgba(90,55,220,0.08)',
+            '0 0 40px 0px rgba(60,25,160,0.12)',
+            '0 0 120px 0px rgba(30,10,80,0.08)',
+          ].join(', '),
+          pointerEvents: 'none', opacity: 0,
+          animation: 'signal-breathe 8s ease-in-out infinite',
+        }}
+      />
+
+      {/* ── Layer 2: violet rim vignette — side curtains ─────────────────────── */}
+      <div
+        ref={rimRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0,
+          background: [
+            'linear-gradient(to right, rgba(6,2,22,0.55) 0%, transparent 22%, transparent 78%, rgba(6,2,22,0.55) 100%)',
+            'linear-gradient(to bottom, rgba(4,1,16,0.40) 0%, transparent 18%, transparent 75%, rgba(4,1,16,0.55) 100%)',
+          ].join(', '),
+        }}
+      />
+
+      {/* ── Layer 3: data stream ─────────────────────────────────────────────── */}
       <div
         ref={streamRef}
         aria-hidden="true"
         style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          gap: '1.1rem',
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          justifyContent: 'center', gap: '1.1rem',
           padding: '2rem 4vw',
-          pointerEvents: 'none',
-          opacity: 0,
+          pointerEvents: 'none', opacity: 0,
+          filter: 'blur(0.3px)',
         }}
       >
         {DATA_ROWS.map((row, i) => (
@@ -118,23 +174,38 @@ export function SignalScene() {
         ))}
       </div>
 
-      {/* Gold warmth bloom from floor */}
+      {/* ── Layer 4: gold warmth bloom from floor ─────────────────────────────── */}
       <div
         ref={glowRef}
         aria-hidden="true"
         style={{
           position: 'absolute', inset: 0, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse 75% 55% at 50% 110%, rgba(212,175,122,0.11) 0%, transparent 60%)',
+          background: [
+            'radial-gradient(ellipse 75% 55% at 50% 110%, rgba(212,175,122,0.13) 0%, transparent 60%)',
+            'radial-gradient(ellipse 40% 30% at 50% 105%, rgba(180,130,80,0.08) 0%, transparent 50%)',
+          ].join(', '),
+          animation: 'signal-drift 12s ease-in-out infinite',
         }}
       />
 
-      {/* Top violet vignette */}
+      {/* ── Layer 5: top violet vignette ─────────────────────────────────────── */}
       <div aria-hidden="true" style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
-        background: 'radial-gradient(ellipse 60% 40% at 50% -8%, rgba(124,111,255,0.06) 0%, transparent 70%)',
+        background: 'radial-gradient(ellipse 70% 45% at 50% -8%, rgba(124,111,255,0.07) 0%, transparent 70%)',
+        animation: 'signal-breathe 10s ease-in-out infinite',
       }} />
 
-      {/* Content */}
+      {/* ── Layer 6: subtle vertical god-ray divs ─────────────────────────────── */}
+      <div aria-hidden="true" style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        background: [
+          'linear-gradient(175deg, rgba(70,35,180,0.04) 0%, transparent 45%)',
+          'linear-gradient(185deg, transparent 55%, rgba(50,20,130,0.03) 100%)',
+        ].join(', '),
+        animation: 'signal-ray-sway 16s ease-in-out infinite',
+      }} />
+
+      {/* ── Content ────────────────────────────────────────────────────────────── */}
       <p ref={labelRef} className="caption" style={{ marginBottom: '2.5rem', letterSpacing: '0.2em' }}>
         Transmission End
       </p>
