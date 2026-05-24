@@ -20,6 +20,11 @@ const ObsidianCanvas = lazy(() =>
   import('./components/canvas/ObsidianCanvas').then(m => ({ default: m.ObsidianCanvas }))
 )
 
+/* 3-D bat — lazy loaded, shares the Three.js chunk with ObsidianCanvas */
+const BatFlyer = lazy(() =>
+  import('./components/entity/BatFlyer').then(m => ({ default: m.BatFlyer }))
+)
+
 export default function App() {
   return (
     <>
@@ -29,6 +34,11 @@ export default function App() {
       {/* Three.js loads async — canvas appears when ready */}
       <Suspense fallback={null}>
         <ObsidianCanvas />
+      </Suspense>
+
+      {/* 3-D bat — flies through the scene driven by scroll */}
+      <Suspense fallback={null}>
+        <BatFlyer />
       </Suspense>
 
       <AmbientGradient />
