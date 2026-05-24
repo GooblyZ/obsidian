@@ -1,0 +1,308 @@
+@import "tailwindcss";
+
+/* ── OBSIDIAN Design System ──────────────────────────────────────────────────
+   Obsidian mineral: volcanic glass — near-black with iridescent sheen.
+   Consciousness archive: memory fragments surface from darkness into light.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* ── Foundation — obsidian mineral tones ── */
+  --color-void:          #06080d;   /* absolute dark — page base             */
+  --color-deep:          #0b0e17;   /* primary surface                       */
+  --color-layer:         #10141f;   /* elevated surface / card               */
+  --color-layer-2:       #161b28;   /* input bg / hover surface              */
+  --color-edge:          #1e2436;   /* default border                        */
+
+  /* ── Iridescence — obsidian mineral shimmer ── */
+  --color-violet:        #7c6fff;   /* primary iridescent accent             */
+  --color-violet-dim:    #4a40c8;   /* pressed / shadow                      */
+  --color-violet-bright: #a99fff;   /* active / hover                        */
+  --color-teal:          #2dd4bf;   /* secondary shimmer                     */
+  --color-teal-dim:      #1a9e8c;   /* pressed teal                          */
+
+  /* ── Gold thread — consciousness / memory ── */
+  --color-gold:          #d4af7a;   /* warm gold — memory highlight          */
+  --color-gold-dim:      #a8884e;   /* muted gold                            */
+
+  /* ── Text ── */
+  --color-text:          #e8e4f0;   /* primary (warm off-white)              */
+  --color-text-mid:      #8d89a0;   /* secondary / muted                     */
+  --color-text-dim:      #4a4760;   /* disabled / placeholder                */
+
+  /* ── Typography ── */
+  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-body:    "DM Sans", system-ui, sans-serif;
+
+  /* ── Easing vocabulary ── */
+  --ease-emerge:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-cinematic: cubic-bezier(0.65, 0.05, 0.36, 1);
+  --ease-retreat:   cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    scroll-behavior: auto;
+    overflow-x: clip;
+    scrollbar-gutter: stable;
+  }
+
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-track { background: var(--color-void); }
+  ::-webkit-scrollbar-thumb { background: var(--color-edge); border-radius: 2px; }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-text);
+    font-family: var(--font-body);
+    font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100dvh;
+  }
+
+  #root {
+    position: relative;
+    isolation: isolate;
+  }
+}
+
+/* ── WebGL canvas — fixed background layer ───────────────────────────────── */
+#obsidian-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── Scroll content — above canvas ───────────────────────────────────────── */
+#scroll-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Display typography ──────────────────────────────────────────────────── */
+.display-xl {
+  font-family: var(--font-display);
+  font-size: clamp(4.5rem, 18vw, 22vw);
+  font-weight: 300;
+  line-height: 0.9;
+  letter-spacing: -0.025em;
+  color: var(--color-text);
+}
+
+.display-lg {
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 10vw, 13vw);
+  font-weight: 300;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+}
+
+.display-md {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 6vw, 7vw);
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+/* Italic serif — emotional marker, used sparingly (max 2 per scene) */
+.em {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  color: var(--color-gold);
+}
+
+.body-lg {
+  font-family: var(--font-body);
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
+  font-weight: 300;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+  color: var(--color-text-mid);
+}
+
+.caption {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+/* ── Scene architecture ──────────────────────────────────────────────────── */
+.scene {
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  contain: layout;  /* prevent scenes from affecting each other's layout */
+}
+
+.scene--tall    { min-height: 220dvh; }
+.scene--breath  { min-height: 55dvh; } /* intentional silence */
+
+/* ── Reveal system — GSAP sets final state; CSS defines start ────────────── */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(28px);
+  will-change: opacity, transform;
+}
+
+[data-reveal="char"] {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(44px) rotateX(28deg);
+  transform-origin: 50% 100%;
+  will-change: opacity, transform;
+}
+
+[data-reveal="fade"] {
+  opacity: 0;
+  transform: none;
+}
+
+[data-reveal="left"] {
+  opacity: 0;
+  transform: translateX(-36px);
+}
+
+/* ── Ambient word glow ───────────────────────────────────────────────────── */
+.word-glow {
+  text-shadow:
+    0 0 80px rgba(124, 111, 255, 0.12),
+    0 0 200px rgba(45, 212, 191, 0.06);
+  transition: text-shadow 1.4s var(--ease-emerge);
+}
+
+.word-glow:hover {
+  text-shadow:
+    0 0 60px rgba(124, 111, 255, 0.30),
+    0 0 130px rgba(45, 212, 191, 0.16),
+    0 0 220px rgba(212, 175, 122, 0.08);
+}
+
+/* ── Gradient text ───────────────────────────────────────────────────────── */
+.text-gradient {
+  background: linear-gradient(135deg, #a99fff 0%, #2dd4bf 55%, #d4af7a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Obsidian divider line ───────────────────────────────────────────────── */
+.rule-obsidian {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(124, 111, 255, 0.3) 30%,
+    rgba(45, 212, 191, 0.3) 70%,
+    transparent 100%
+  );
+}
+
+/* ── Nav dots ────────────────────────────────────────────────────────────── */
+.nav-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-edge);
+  transition: background 0.5s var(--ease-emerge), transform 0.5s var(--ease-emerge);
+}
+.nav-dot.active {
+  background: var(--color-violet);
+  transform: scale(1.8);
+}
+
+/* ── Custom cursor — hide native on hover-capable devices ────────────────── */
+@media (hover: hover) and (pointer: fine) {
+  * { cursor: none !important; }
+  input, textarea, select, button { cursor: none !important; }
+}
+
+/* ── Film grain — subtle texture overlay across all scenes ───────────────── */
+/* Uses an SVG noise filter baked into a data URI for zero network cost.     */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+/* ── Persistent CTA pill — fixed bottom-right after hero ────────────────── */
+.persistent-cta {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 50;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.6s cubic-bezier(0.16,1,0.3,1), transform 0.6s cubic-bezier(0.16,1,0.3,1);
+  pointer-events: none;
+}
+.persistent-cta.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.persistent-cta button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(169,159,255,0.22);
+  background: rgba(11,14,23,0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--color-text-mid);
+  font-family: var(--font-body);
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.35s, color 0.35s, background 0.35s;
+}
+.persistent-cta button:hover {
+  border-color: rgba(169,159,255,0.45);
+  background: rgba(124,111,255,0.10);
+  color: var(--color-violet-bright);
+}
+
+/* ── Mobile — hide pointer-only elements, compress spacing ───────────────── */
+@media (max-width: 640px) {
+  .display-xl { font-size: clamp(3.5rem, 22vw, 22vw); }
+  .display-lg { font-size: clamp(2.2rem, 12vw, 12vw); }
+  .display-md { font-size: clamp(1.6rem, 8vw, 8vw); }
+
+  /* Runner scene: smaller text on mobile so it fits */
+  .runner-text { font-size: clamp(1.6rem, 8vw, 8vw) !important; }
+
+  /* Remove custom cursor on touch devices (already handled by @media hover) */
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
